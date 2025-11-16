@@ -1,55 +1,53 @@
-# ===== 로그인 상태 지속 (쿠키처럼 동작) =====
-import streamlit.components.v1 as components
-
-# localStorage → session_state.user 로 복원
-if "user" not in st.session_state or st.session_state.user is None:
-    user_script = """
-        <script>
-            const savedUser = window.localStorage.getItem("petmate_user");
-            if (savedUser) {
-                const pyCode = `
+import os
+import json
+import uuid
+from datetime import datetime, date, time, timedelta
+from dateutil import tz
+import pandas as pd
 import streamlit as st
-st.session_state["user"] = "${savedUser}"
-`;
-                fetch("/_stcore/stream", {
-                    method: "POST",
-                    body: pyCode
-                });
-            }
-        </script>
-    """
-    components.html(user_script, height=0)
+import hashlib
+import matplotlib.pyplot as plt
 
-# session_state.user 변경되면 → localStorage 저장
-if st.session_state.get("user"):
-    save_script = f"""
-        <script>
-            window.localStorage.setItem("petmate_user", "{st.session_state.user}");
-        </script>
-    """
-    components.html(save_script, height=0)
-else:
-    # 로그아웃 시 localStorage 제거
-    clear_script = """
-        <script>
-            window.localStorage.removeItem("petmate_user");
-        </script>
-    """
-    components.html(clear_script, height=0)
+# =============================================
+# 🔐 페이지 설정 + 폴더 준비
+# =============================================
+st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
+
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+USER_FILE = os.path.join(DATA_DIR, "users.json")
+PET_FILE = os.path.join(DATA_DIR, "pets.json")
+MED_FILE = os.path.join(DATA_DIR, "med_schedule.json")
+HOSP_FILE = os.path.join(DATA_DIR, "hospital_events.json")
+UNSAFE_FILE = os.path.join(DATA_DIR, "unsafe_db.json")
+
+PHOTO_DIR = os.path.join(DATA_DIR, "pet_photos")
+os.makedirs(PHOTO_DIR, exist_ok=True)
+
+FEED_FILE = os.path.join(DATA_DIR, "feed_log.csv")
+WATER_FILE = os.path.join(DATA_DIR, "water_log.csv")
+WEIGHT_FILE = os.path.join(DATA_DIR, "weight_log.csv")
+
+feed_cols = ["log_id", "pet_id", "date", "amount_g", "memo"]
+water_cols = ["log_id", "pet_id", "date", "amount_ml", "memo"]
+weight_cols = ["log_id", "pet_id", "date", "weight"]
+
+# =============================================
 # 유틸 함수
 # =============================================
 def load_json(path, default):
     if os.path.exists(path):
         try:
-            with open(path,"r",encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except:
             return default
     return default
 
 def save_json(path, data):
-    with open(path,"w",encoding="utf-8") as f:
-        json.dump(data,f,ensure_ascii=False,indent=2)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 def load_df(path, columns):
     if os.path.exists(path):
@@ -68,6 +66,27 @@ def today():
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
+def pet_selector(label, key=None):
+    """반려동물 선택 드롭다운."""
+    if "pets" not in st.session_state or len(st.session_state.pets) == 0:
+        st.warning("반려동물이 등록되지 않았습니다.")
+        return None
+    pets = st.session_state.pets
+    names = {f"{p['name']} ({p['species']})": p for p in pets}
+    choice = st.selectbox(label, list(names.keys()), key=key)
+    return names[choice]
+
+def recommended_food(species, weight):
+    """일일 권장 사료량(g) 단순 모델."""
+    if species == "개":
+        grams = weight * 30
+    elif species == "고양이":
+        grams = weight * 25
+    else:
+        grams = weight * 20
+    calories = grams * 3.5
+    return grams, calories
+
 # =============================================
 # 쿠키 기반 자동 로그인
 # =============================================
@@ -77,17 +96,9 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 cookie_user = st.experimental_get_cookie("petmate_user")
-
 if cookie_user and st.session_state.user is None:
     st.session_state.user = cookie_user
     st.rerun()
-
-# =============================================
-# 탭 생성
-# =============================================
-tab_login, tab_join, tab_dash, tab_profile, tab_feed, tab_med, tab_hosp, tab_risk, tab_data = st.tabs([
-    "로그인", "회원가입", "대시보드", "프로필", "사료/급수", "복약", "병원 일정", "위험 검색", "데이터 관리"
-])
 
 # =============================================
 # 세션 초기화 데이터
@@ -101,19 +112,29 @@ if "unsafe_db" not in st.session_state:
         {"category":"음식","name":"포도","risk":"고위험","why":"급성 신부전 위험"}
     ])
 
+if "hospital_events" not in st.session_state:
+    st.session_state.hospital_events = load_json(HOSP_FILE, [])
+
+if "med_schedule" not in st.session_state:
+    st.session_state.med_schedule = load_json(MED_FILE, [])
+
 feed_df = load_df(FEED_FILE, feed_cols)
 water_df = load_df(WATER_FILE, water_cols)
 weight_df = load_df(WEIGHT_FILE, weight_cols)
 
 # =============================================
+# 탭 생성
+# =============================================
+tab_login, tab_join, tab_dash, tab_profile, tab_feed, tab_med, tab_hosp, tab_risk, tab_data = st.tabs([
+    "로그인", "회원가입", "대시보드", "프로필", "사료/급수", "복약", "병원 일정", "위험 검색", "데이터 관리"
+])
+
+# =============================================
 # Step 2 — 로그인 화면
 # =============================================
-
 st.title("🐾 PetMate")
 
 if st.session_state.user is None:
-
-    st.info("PetMate에 오신 것을 환영합니다!")
 
     with tab_login:
         username = st.text_input("아이디")
@@ -122,11 +143,10 @@ if st.session_state.user is None:
         if st.button("로그인"):
             hashed = hash_pw(password)
             valid = any(u["username"] == username and u["password"] == hashed for u in users)
-
             if valid:
                 st.session_state.user = username
                 st.experimental_set_cookie("petmate_user", username,
-                                           expires=datetime.now()+timedelta(days=30),
+                                           expires=datetime.now() + timedelta(days=30),
                                            secure=True, same_site="Lax")
                 st.success("로그인 성공!")
                 st.rerun()
@@ -149,10 +169,9 @@ if st.session_state.user is None:
 
     st.stop()
 
-# ==============================================
-# Step 3 — 대시보드 차트 섹션 (기능 유지 + 완전 정리)
-# ==============================================
-
+# =============================================
+# Step 3 — 대시보드
+# =============================================
 with tab_dash:
 
     pet = pet_selector("차트용 반려동물 선택", key="dash_charts")
@@ -162,7 +181,6 @@ with tab_dash:
 
     st.markdown("## 📈 최근 기록 차트")
 
-    # 기본 날짜
     today_str = today().isoformat()
     last7 = [(today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
 
@@ -176,7 +194,6 @@ with tab_dash:
         .sum()
         .reindex(last7, fill_value=0)
     )
-
     st.subheader("🍽️ 최근 7일 사료 섭취량")
     st.line_chart(feed_chart)
 
@@ -190,12 +207,11 @@ with tab_dash:
         .sum()
         .reindex(last7, fill_value=0)
     )
-
     st.subheader("💧 최근 7일 물 섭취량")
     st.bar_chart(water_chart)
 
     # ========================================================
-    # ③ 병원 일정 — 월별 방문 횟수
+    # ③ 월별 병원 방문 수
     # ========================================================
     hosp = pd.DataFrame(st.session_state.hospital_events)
     hosp_pet = hosp[hosp["pet_id"] == pet["id"]]
@@ -209,61 +225,9 @@ with tab_dash:
     else:
         st.info("병원 방문 기록이 없습니다.")
 
-
-    # ==============================================
-    # ✔ 선택형 차트 (보고 싶은 것만 체크)
-    # ==============================================
-    st.markdown("## 🎛️ 선택형 차트 보기")
-
-    show_feed = st.checkbox("🍽️ 최근 7일 사료 섭취량(중복)", value=False)
-    show_water = st.checkbox("💧 최근 7일 물 섭취량(중복)", value=False)
-    show_hosp = st.checkbox("🏥 월별 병원 방문 수(중복)", value=False)
-    show_meds = st.checkbox("💊 오늘 복약 타임라인", value=False)
-
-    if show_feed:
-        st.subheader("🍽️ 최근 7일 사료 섭취량")
-        st.line_chart(feed_chart)
-
-    if show_water:
-        st.subheader("💧 최근 7일 물 섭취량")
-        st.bar_chart(water_chart)
-
-    if show_hosp:
-        st.subheader("🏥 월별 병원 방문 수")
-        if not hosp_pet.empty:
-            st.line_chart(hosp_month)
-        else:
-            st.info("병원 방문 기록 없음")
-
-    if show_meds:
-        st.subheader("💊 오늘 복약 타임라인")
-
-        meds_pet = [m for m in st.session_state.med_schedule if m["pet_id"] == pet["id"]]
-        if meds_pet:
-            med_today = []
-            for m in meds_pet:
-                for t in m.get("times", []):
-                    med_today.append({"약": m["drug"], "시간": t})
-
-            med_today_df = pd.DataFrame(med_today).sort_values("시간")
-            st.table(med_today_df)
-        else:
-            st.info("오늘 복약 스케줄이 없습니다.")
-
-
-    # ==============================================
-    # ✔ 고급 차트 섹션
-    # ==============================================
-    st.markdown("## 🧩 고급 데이터 분석 기능")
-
-    # 선택 기간
-    period = st.selectbox("조회 기간 선택", ["7일", "14일", "30일"], index=0)
-    n = int(period.replace("일", ""))
-    date_range = [(today() - timedelta(days=i)).isoformat() for i in range(n-1, -1, -1)]
-
-    # ==================================================
-    # ① 오늘 섭취량 도넛 차트
-    # ==================================================
+    # ========================================================
+    # ④ 도넛 차트 — 오늘 섭취량
+    # ========================================================
     st.subheader("🥣 오늘 사료 섭취 도넛 차트")
 
     eaten = feed_chart.iloc[-1] if len(feed_chart) else 0
@@ -275,10 +239,9 @@ with tab_dash:
            autopct="%1.1f%%", startangle=90, wedgeprops={'width':0.4})
     st.pyplot(fig)
 
-
-    # ==================================================
-    # ② 병원 일정 캘린더형 표
-    # ==================================================
+    # ========================================================
+    # ⑤ 캘린더형 병원 일정표
+    # ========================================================
     st.subheader("🗓️ 병원 방문 캘린더")
 
     if not hosp_pet.empty:
@@ -289,13 +252,11 @@ with tab_dash:
     else:
         st.info("병원 일정이 없습니다.")
 
-
-    # ==================================================
-    # ③ 체중 기록 + 변화 그래프
-    # ==================================================
+    # ========================================================
+    # ⑥ 체중 기록
+    # ========================================================
     st.subheader("⚖️ 체중 기록 및 변화 그래프")
 
-    # 체중 추가
     with st.form("weight_add"):
         new_weight = st.number_input("오늘 체중 (kg)", min_value=0.0, step=0.1)
         ok_w = st.form_submit_button("저장")
@@ -308,7 +269,7 @@ with tab_dash:
             })
             weight_df_local = pd.concat([weight_df, record], ignore_index=True)
             save_df(WEIGHT_FILE, weight_df_local)
-            st.success("체중이 저장되었습니다.")
+            st.success("저장되었습니다.")
             st.rerun()
 
     w_pet = weight_df[weight_df["pet_id"] == pet["id"]]
@@ -318,48 +279,12 @@ with tab_dash:
     else:
         st.info("체중 기록이 없습니다.")
 
-
-    # ==================================================
-    # ④ 여러 마리 비교 그래프
-    # ==================================================
-    st.subheader("🐾 여러 반려동물 비교 그래프")
-
-    pets = st.session_state.pets
-    if len(pets) >= 2:
-        selected = st.multiselect("비교할 반려동물 선택",
-                                  [f"{p['name']} ({p['id']})" for p in pets])
-
-        if selected:
-            compare_data = {}
-            for s in selected:
-                pid = s.split("(")[-1].replace(")", "")
-                name = s.split("(")[0].strip()
-
-                series = (
-                    feed_df[(feed_df["pet_id"] == pid) &
-                            (feed_df["date"].isin(date_range))]
-                    .groupby("date")["amount_g"]
-                    .sum()
-                    .reindex(date_range, fill_value=0)
-                )
-
-                compare_data[name] = series.values
-
-            comp_df = pd.DataFrame(compare_data, index=date_range)
-            st.line_chart(comp_df)
-
-        else:
-            st.info("비교할 반려동물을 선택하세요.")
-    else:
-        st.info("두 마리 이상 등록해야 비교 가능합니다.")
-# ==============================================
+# =============================================
 # Step 4 — 반려동물 프로필
-# ==============================================
-
+# =============================================
 with tab_profile:
     st.header("🐶 반려동물 프로필")
 
-    # 등록 폼
     st.subheader("➕ 새 반려동물 등록")
     with st.form("pet_add_form", clear_on_submit=True):
         name = st.text_input("이름 *")
@@ -411,8 +336,7 @@ with tab_profile:
                     p["name"] = st.text_input("이름", p["name"], key=f"name_{p['id']}")
                     p["species"] = st.selectbox("종", ["개", "고양이", "기타"],
                         index=["개","고양이","기타"].index(p["species"]),
-                        key=f"species_{p['id']}"
-                    )
+                        key=f"species_{p['id']}")
                     p["breed"] = st.text_input("품종", p.get("breed",""), key=f"breed_{p['id']}")
                     p["birth"] = st.text_input("생일 (YYYY-MM-DD)", p.get("birth",""), key=f"birth_{p['id']}")
                     p["weight_kg"] = st.number_input("체중(kg)", value=float(p.get("weight_kg",0.0)), step=0.1, key=f"weight_{p['id']}")
@@ -437,10 +361,9 @@ with tab_profile:
                         st.warning(f"{p['name']} 삭제됨.")
                         st.rerun()
 
-# ==============================================
+# =============================================
 # Step 4 — 사료/급수 기록
-# ==============================================
-
+# =============================================
 with tab_feed:
     st.header("🍽️ 사료/급수 기록")
 
@@ -487,10 +410,9 @@ with tab_feed:
 
                 st.success("기록이 저장되었습니다!")
 
-# ==============================================
+# =============================================
 # Step 4 — 복약 스케줄
-# ==============================================
-
+# =============================================
 with tab_med:
     st.header("💊 복약 스케줄")
 
@@ -513,9 +435,9 @@ with tab_med:
 
             notes = st.text_area("메모")
 
-            submit = st.form_submit_button("추가")
+            ok = st.form_submit_button("추가")
 
-            if submit:
+            if ok:
                 if not drug or not times_str.strip():
                     st.error("약 이름과 시간은 필수입니다.")
                 else:
@@ -536,7 +458,6 @@ with tab_med:
                     save_json(MED_FILE, med_list)
                     st.success("스케줄이 추가되었습니다!")
 
-        # 목록/삭제
         st.subheader("📄 등록된 스케줄")
 
         med_list = load_json(MED_FILE, [])
@@ -555,12 +476,12 @@ with tab_med:
                     if st.button("삭제", key=f"med_del_{m['id']}"):
                         med_list = [x for x in med_list if x["id"] != m["id"]]
                         save_json(MED_FILE, med_list)
-                        st.warning("삭제 완료")
+                        st.warning("삭제 완료!")
                         st.rerun()
-# ==============================================
-# Step 4 — 병원 일정
-# ==============================================
 
+# =============================================
+# Step 4 — 병원 일정
+# =============================================
 with tab_hosp:
     st.header("🏥 병원 일정")
 
@@ -599,46 +520,43 @@ with tab_hosp:
                     events = load_json(HOSP_FILE, [])
                     events.append(rec)
                     save_json(HOSP_FILE, events)
+                    st.session_state.hospital_events = events  # ★ 중요
 
                     st.success("일정이 등록되었습니다!")
 
-        st.subheader("📅 등록된 병원 일정")
+    st.subheader("📅 등록된 병원 일정")
 
-        events = load_json(HOSP_FILE, [])
-        upcoming = sorted(
-            [e for e in events if e["pet_id"] == pet["id"]],
-            key=lambda x: x["dt"]
-        )
+    events = load_json(HOSP_FILE, [])
+    upcoming = sorted(
+        [e for e in events if e["pet_id"] == pet["id"]],
+        key=lambda x: x["dt"]
+    )
 
-        if not upcoming:
-            st.info("등록된 일정이 없습니다.")
-        else:
-            for e in upcoming:
-                dt_show = datetime.fromisoformat(e["dt"]).strftime("%Y-%m-%d %H:%M")
-                st.write(f"**{dt_show}** — {e['title']} @ {e.get('place','')}")
+    if not upcoming:
+        st.info("등록된 일정이 없습니다.")
+    else:
+        for e in upcoming:
+            dt_show = datetime.fromisoformat(e["dt"]).strftime("%Y-%m-%d %H:%M")
+            st.write(f"**{dt_show}** — {e['title']} @ {e.get('place','')}")
+            if e.get("notes"):
+                st.caption(e["notes"])
 
-                if e.get("notes"):
-                    st.caption(e["notes"])
+            if st.button("삭제", key=f"hosp_del_{e['id']}"):
+                events = [x for x in events if x["id"] != e["id"]]
+                save_json(HOSP_FILE, events)
+                st.warning("삭제되었습니다.")
+                st.rerun()
 
-                if st.button("삭제", key=f"hosp_del_{e['id']}"):
-                    events = [x for x in events if x["id"] != e["id"]]
-                    save_json(HOSP_FILE, events)
-                    st.warning("삭제되었습니다.")
-                    st.rerun()
-
-# ==============================================
-# Step 5 — 위험 정보 검색 탭
-# ==============================================
-
+# =============================================
+# Step 5 — 위험 정보 검색
+# =============================================
 with tab_risk:
     st.header("⚠️ 위험 음식/식물/물품 검색")
 
-    # DataFrame 준비
     db = pd.DataFrame(st.session_state.unsafe_db)
     if db.empty:
         db = pd.DataFrame(columns=["category", "name", "risk", "why"])
 
-    # 검색창
     query = st.text_input("검색어 입력", placeholder="초콜릿, 양파, 백합꽃...")
 
     if query:
@@ -649,7 +567,6 @@ with tab_risk:
     st.subheader("📄 위험 리스트")
     st.dataframe(view.sort_values(["category", "risk"]))
 
-    # 항목 추가
     st.subheader("➕ 새 항목 추가")
 
     with st.form("unsafe_add", clear_on_submit=True):
@@ -672,52 +589,40 @@ with tab_risk:
                 save_json(UNSAFE_FILE, st.session_state.unsafe_db)
                 st.success(f"{nm} 추가 완료!")
 
-# ==============================================
-# Step 5 — 데이터 관리/백업 탭
-# ==============================================
-
+# =============================================
+# Step 5 — 데이터 관리
+# =============================================
 with tab_data:
     st.header("🗂️ 데이터 관리 / 백업")
 
     col1, col2 = st.columns(2)
 
-    # ---------------------
-    # 사료/급수 초기화
-    # ---------------------
     with col1:
         if st.button("🍽️ 사료/급수 로그 초기화"):
             save_df(FEED_FILE, pd.DataFrame(columns=feed_cols))
             save_df(WATER_FILE, pd.DataFrame(columns=water_cols))
-            st.success("사료/급수 로그가 모두 초기화되었습니다.")
+            st.success("사료/급수 로그 초기화 완료!")
 
-    # ---------------------
-    # 프로필/스케줄/병원 초기화
-    # ---------------------
     with col2:
         if st.button("📄 프로필/스케줄/병원 DB 초기화"):
             save_json(PET_FILE, [])
             save_json(MED_FILE, [])
             save_json(HOSP_FILE, [])
             save_json(UNSAFE_FILE, [])
-            st.success("프로필/스케줄/병원/위험DB 초기화 완료!")
+            st.success("모든 DB 초기화 완료!")
             st.rerun()
 
     st.divider()
 
-    # ---------------------
-    # 전체 계정 삭제
-    # ---------------------
     if st.button("👥 모든 계정 삭제"):
         save_json(USER_FILE, [])
         st.session_state.user = None
         st.experimental_delete_cookie("petmate_user")
-        st.success("모든 계정이 삭제되었습니다.")
+        st.success("모든 계정 삭제 완료!")
         st.rerun()
 
-# ==============================================
-# Step 5 — 푸터
-# ==============================================
-
+# =============================================
+# 푸터
+# =============================================
 st.divider()
-st.caption("© 2025 PetMate • 학습/포트폴리오용 샘플입니다. 실제 의료 조언은 수의사와 상담하세요.")
-
+st.caption("© 2025 PetMate • 학습/포트폴리오용 예제입니다. 실제 의료 상담은 수의사와 진행하세요.")
