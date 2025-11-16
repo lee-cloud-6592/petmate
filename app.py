@@ -18,6 +18,7 @@ if "user" not in st.session_state:
 # 쿠키로 자동 로그인
 if cookie_user and st.session_state.user is None:
     st.session_state.user = cookie_user
+    st.rerun()
     # =============================================
 # Step 1 — 데이터 경로 및 유틸 함수
 # =============================================
@@ -118,6 +119,8 @@ if st.session_state.user is None:
                     "petmate_user",
                     username,
                     expires=datetime.now() + timedelta(days=30)
+                    secure=True,
+                    same_site="Lax"
                 )
 
                 st.success("로그인 성공!")
