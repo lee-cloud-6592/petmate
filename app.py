@@ -107,7 +107,9 @@ if st.session_state.user is None:
     st.info("PetMate에 오신 것을 환영합니다! 로그인하거나 새 계정을 만들어 시작하세요.")
 
     # ---------------- 로그인 ---------------
-
+    with tab_login: 
+        username = st.text_input("아이디") 
+        password = st.text_input("비밀번호", type="password")
         if st.button("로그인"):
             hashed = hash_pw(password)
             valid = any(u["username"] == username and u["password"] == hashed for u in users)
