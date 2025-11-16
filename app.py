@@ -7,7 +7,7 @@ import hashlib
 import matplotlib.pyplot as plt
 
 # =============================================
-# 🔐 Step 0: 쿠키 기반 자동 로그인 (가장 먼저 실행)
+# 🔐 Step 0: 페이지 설정 + 데이터 폴더 준비
 # =============================================
 st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
 
@@ -27,11 +27,11 @@ WATER_FILE = os.path.join(DATA_DIR, "water_log.csv")
 WEIGHT_FILE = os.path.join(DATA_DIR, "weight_log.csv")
 
 feed_cols = ["log_id", "pet_id", "date", "amount_g", "memo"]
-water_cols = ["log_id","pet_id","date","amount_ml","memo"]
-weight_cols = ["log_id","pet_id","date","weight"]
+water_cols = ["log_id", "pet_id", "date", "amount_ml", "memo"]
+weight_cols = ["log_id", "pet_id", "date", "weight"]
 
 # =============================================
-# 유틸 함수 정의
+# 유틸 함수
 # =============================================
 def load_json(path, default):
     if os.path.exists(path):
@@ -64,7 +64,7 @@ def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 # =============================================
-# Step 0-1: 쿠키 기반 자동 로그인
+# 쿠키 기반 자동 로그인
 # =============================================
 users = load_json(USER_FILE, [])
 
@@ -76,85 +76,73 @@ cookie_user = st.experimental_get_cookie("petmate_user")
 if cookie_user and st.session_state.user is None:
     st.session_state.user = cookie_user
     st.rerun()
+
 # =============================================
-# 탭 생성 (필수)
+# 탭 생성
 # =============================================
 tab_login, tab_join, tab_dash, tab_profile, tab_feed, tab_med, tab_hosp, tab_risk, tab_data = st.tabs([
     "로그인", "회원가입", "대시보드", "프로필", "사료/급수", "복약", "병원 일정", "위험 검색", "데이터 관리"
 ])
 
-
-# 세션 초기화
+# =============================================
+# 세션 초기화 데이터
+# =============================================
 if "pets" not in st.session_state:
     st.session_state.pets = load_json(PET_FILE, [])
 
 if "unsafe_db" not in st.session_state:
-    default_unsafe = [
+    st.session_state.unsafe_db = load_json(UNSAFE_FILE, [
         {"category":"음식","name":"초콜릿","risk":"고위험","why":"테오브로민 독성"},
         {"category":"음식","name":"포도","risk":"고위험","why":"급성 신부전 위험"}
-    ]
-    st.session_state.unsafe_db = load_json(UNSAFE_FILE, default_unsafe)
+    ])
 
 feed_df = load_df(FEED_FILE, feed_cols)
 water_df = load_df(WATER_FILE, water_cols)
 weight_df = load_df(WEIGHT_FILE, weight_cols)
 
 # =============================================
-# Step 2 — 로그인 / 회원가입 화면
+# Step 2 — 로그인 화면
 # =============================================
 
 st.title("🐾 PetMate")
 
-# 로그인 안 된 경우
 if st.session_state.user is None:
 
-    st.info("PetMate에 오신 것을 환영합니다! 로그인하거나 새 계정을 만들어 시작하세요.")
+    st.info("PetMate에 오신 것을 환영합니다!")
 
-    # ---------------- 로그인 ---------------
-    with tab_login: 
-        username = st.text_input("아이디") 
+    with tab_login:
+        username = st.text_input("아이디")
         password = st.text_input("비밀번호", type="password")
+
         if st.button("로그인"):
             hashed = hash_pw(password)
             valid = any(u["username"] == username and u["password"] == hashed for u in users)
 
             if valid:
                 st.session_state.user = username
-                
-                # 쿠키 저장 (30일 유지)
-                st.experimental_set_cookie(
-                    "petmate_user",
-                    username,
-                    expires=datetime.now() + timedelta(days=30),
-                    secure=True,
-                    same_site="Lax"
-                )
-
+                st.experimental_set_cookie("petmate_user", username,
+                                           expires=datetime.now()+timedelta(days=30),
+                                           secure=True, same_site="Lax")
                 st.success("로그인 성공!")
                 st.rerun()
             else:
                 st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
-    # ... (회원가입 탭 처리) ...
 
-    # ⚠️ 로그인이 안 된 상태에서는 여기까지만 실행하고 앱을 멈춥니다.
-    st.stop()
-
-    # ---------------- 회원가입 ----------------
     with tab_join:
         new_user = st.text_input("새 아이디")
         new_pass = st.text_input("새 비밀번호", type="password")
 
         if st.button("회원가입"):
             if not new_user or not new_pass:
-                st.error("아이디와 비밀번호를 모두 입력하세요.")
+                st.error("둘 다 입력하세요.")
             elif any(u["username"] == new_user for u in users):
                 st.error("이미 존재하는 아이디입니다.")
             else:
                 users.append({"username": new_user, "password": hash_pw(new_pass)})
                 save_json(USER_FILE, users)
-                st.success("회원가입 완료! 로그인해 주세요.")
+                st.success("회원가입 완료!")
 
-    st.stop()  # 로그인 전에는 아래 코드 실행 안됨
+    st.stop()
 
 # ==============================================
 # Step 3 — 대시보드 차트 섹션 (기능 유지 + 완전 정리)
