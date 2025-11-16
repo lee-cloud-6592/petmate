@@ -99,9 +99,6 @@ if st.session_state.user is None:
 
     st.info("PetMate에 오신 것을 환영합니다! 로그인하거나 새 계정을 만들어 시작하세요.")
 
-    tab_login, tab_join = st.tabs(["로그인", "회원가입"])
-    users = load_json(USER_FILE, [])
-
     # ---------------- 로그인 ----------------
     with tab_login:
         username = st.text_input("아이디")
@@ -118,7 +115,7 @@ if st.session_state.user is None:
                 st.experimental_set_cookie(
                     "petmate_user",
                     username,
-                    expires=datetime.now() + timedelta(days=30)
+                    expires=datetime.now() + timedelta(days=30),
                     secure=True,
                     same_site="Lax"
                 )
@@ -127,6 +124,10 @@ if st.session_state.user is None:
                 st.rerun()
             else:
                 st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
+    # ... (회원가입 탭 처리) ...
+
+    # ⚠️ 로그인이 안 된 상태에서는 여기까지만 실행하고 앱을 멈춥니다.
+    st.stop()
 
     # ---------------- 회원가입 ----------------
     with tab_join:
