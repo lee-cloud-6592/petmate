@@ -1,39 +1,41 @@
-import os
-import json
-import uuid
-from datetime import datetime, date, time, timedelta
-from dateutil import tz
-import pandas as pd
+# ===== 로그인 상태 지속 (쿠키처럼 동작) =====
+import streamlit.components.v1 as components
+
+# localStorage → session_state.user 로 복원
+if "user" not in st.session_state or st.session_state.user is None:
+    user_script = """
+        <script>
+            const savedUser = window.localStorage.getItem("petmate_user");
+            if (savedUser) {
+                const pyCode = `
 import streamlit as st
-import hashlib
-import matplotlib.pyplot as plt
+st.session_state["user"] = "${savedUser}"
+`;
+                fetch("/_stcore/stream", {
+                    method: "POST",
+                    body: pyCode
+                });
+            }
+        </script>
+    """
+    components.html(user_script, height=0)
 
-
-# =============================================
-# 🔐 Step 0: 페이지 설정 + 데이터 폴더 준비
-# =============================================
-st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
-
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-USER_FILE = os.path.join(DATA_DIR, "users.json")
-PET_FILE = os.path.join(DATA_DIR, "pets.json")
-MED_FILE = os.path.join(DATA_DIR, "med_schedule.json")
-HOSP_FILE = os.path.join(DATA_DIR, "hospital_events.json")
-UNSAFE_FILE = os.path.join(DATA_DIR, "unsafe_db.json")
-PHOTO_DIR = os.path.join(DATA_DIR, "pet_photos")
-os.makedirs(PHOTO_DIR, exist_ok=True)
-
-FEED_FILE = os.path.join(DATA_DIR, "feed_log.csv")
-WATER_FILE = os.path.join(DATA_DIR, "water_log.csv")
-WEIGHT_FILE = os.path.join(DATA_DIR, "weight_log.csv")
-
-feed_cols = ["log_id", "pet_id", "date", "amount_g", "memo"]
-water_cols = ["log_id", "pet_id", "date", "amount_ml", "memo"]
-weight_cols = ["log_id", "pet_id", "date", "weight"]
-
-# =============================================
+# session_state.user 변경되면 → localStorage 저장
+if st.session_state.get("user"):
+    save_script = f"""
+        <script>
+            window.localStorage.setItem("petmate_user", "{st.session_state.user}");
+        </script>
+    """
+    components.html(save_script, height=0)
+else:
+    # 로그아웃 시 localStorage 제거
+    clear_script = """
+        <script>
+            window.localStorage.removeItem("petmate_user");
+        </script>
+    """
+    components.html(clear_script, height=0)
 # 유틸 함수
 # =============================================
 def load_json(path, default):
