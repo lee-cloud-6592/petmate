@@ -11,25 +11,6 @@ import matplotlib.pyplot as plt
 # =============================================
 st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
 
-# 0-1) users.json 불러오기 (필수)
-users = load_json(USER_FILE, [])
-
-# 세션에 user가 없으면 초기화
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-# 0-2) 쿠키 불러오기
-cookie_user = st.experimental_get_cookie("petmate_user")
-
-# 0-3) 쿠키가 있고 아직 로그인 안된 경우 → 자동 로그인
-if cookie_user and st.session_state.user is None:
-    st.session_state.user = cookie_user
-    st.rerun()   # 로그인된 상태로 새로고침
-
-    # =============================================
-# Step 1 — 데이터 경로 및 유틸 함수
-# =============================================
-
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -49,6 +30,9 @@ feed_cols = ["log_id", "pet_id", "date", "amount_g", "memo"]
 water_cols = ["log_id","pet_id","date","amount_ml","memo"]
 weight_cols = ["log_id","pet_id","date","weight"]
 
+# =============================================
+# 유틸 함수 정의
+# =============================================
 def load_json(path, default):
     if os.path.exists(path):
         try:
@@ -79,6 +63,27 @@ def today():
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
+# =============================================
+# Step 0-1: 쿠키 기반 자동 로그인
+# =============================================
+users = load_json(USER_FILE, [])
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+cookie_user = st.experimental_get_cookie("petmate_user")
+
+if cookie_user and st.session_state.user is None:
+    st.session_state.user = cookie_user
+    st.rerun()
+# =============================================
+# 탭 생성 (필수)
+# =============================================
+tab_login, tab_join, tab_dash, tab_profile, tab_feed, tab_med, tab_hosp, tab_risk, tab_data = st.tabs([
+    "로그인", "회원가입", "대시보드", "프로필", "사료/급수", "복약", "병원 일정", "위험 검색", "데이터 관리"
+])
+
+
 # 세션 초기화
 if "pets" not in st.session_state:
     st.session_state.pets = load_json(PET_FILE, [])
@@ -98,7 +103,6 @@ weight_df = load_df(WEIGHT_FILE, weight_cols)
 # Step 2 — 로그인 / 회원가입 화면
 # =============================================
 
-st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
 st.title("🐾 PetMate")
 
 # 로그인 안 된 경우
