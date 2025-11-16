@@ -1,4 +1,4 @@
-# PetMate: 반려동물 통합 케어 앱 (Streamlit) - 완전판
+# PetMate: 반려동물 통합 케어 앱 (Streamlit)
 import os, json, uuid
 from datetime import datetime, date, time, timedelta
 from dateutil import tz
@@ -6,54 +6,37 @@ import pandas as pd
 import streamlit as st
 import hashlib
 
+# ===== 쿠키 기반 로그인 유지 =====
+cookie_user = st.experimental_get_cookie("petmate_user")
+
+# 세션에 사용자 정보가 없고 쿠키는 존재하면 → 자동 로그인 처리
+if ("user" not in st.session_state or st.session_state.user is None) and cookie_user:
+    st.session_state.user = cookie_user
+    
 # ===== 경로 설정 =====
 DATA_DIR = "data"
 USER_FILE = os.path.join(DATA_DIR, "users.json")
 PHOTO_DIR = os.path.join(DATA_DIR, "pet_photos")
+os.makedirs(PHOTO_DIR, exist_ok=True)
 PET_FILE = os.path.join(DATA_DIR, "pets.json")
 FEED_FILE = os.path.join(DATA_DIR, "feed_log.csv")
 WATER_FILE = os.path.join(DATA_DIR, "water_log.csv")
-WEIGHT_FILE = os.path.join(DATA_DIR, "weight_log.csv")
 MED_FILE = os.path.join(DATA_DIR, "med_schedule.json")
 HOSP_FILE = os.path.join(DATA_DIR, "hospital_events.json")
 UNSAFE_FILE = os.path.join(DATA_DIR, "unsafe_db.json")
-COOKIE_FILE = os.path.join(DATA_DIR, "login_cookie.json")
 os.makedirs(DATA_DIR, exist_ok=True)
-os.makedirs(PHOTO_DIR, exist_ok=True)
 
-# ===== 유틸 함수 =====
+# ===== 유틸 =====
 def load_json(path, default):
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as f: 
-                return json.load(f)
-        except: 
-            return default
+            with open(path,"r",encoding="utf-8") as f: return json.load(f)
+        except: return default
     return default
-
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f: 
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def load_csv(path, cols):
-    if os.path.exists(path):
-        try: 
-            df = pd.read_csv(path)
-            if df.empty:
-                return pd.DataFrame(columns=cols)
-            return df
-        except: 
-            return pd.DataFrame(columns=cols)
-    return pd.DataFrame(columns=cols)
-
-def save_csv(path, df): 
-    df.to_csv(path, index=False)
-
-def local_today(): 
-    return datetime.now(tz.gettz("Asia/Seoul")).date()
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def save_json(path,data):
+    with open(path,"w",encoding="utf-8") as f: json.dump(data,f,ensure_ascii=False,indent=2)
+if "user" not in st.session_state:
+    st.session_state.user = None   # 현재 로그인한 사용자
 
 def load_users():
     return load_json(USER_FILE, [])
@@ -61,641 +44,662 @@ def load_users():
 def save_users(users):
     save_json(USER_FILE, users)
 
-# ===== 쿠키 관련 함수 =====
-def save_login_cookie(username):
-    cookie_data = {
-        "username": username,
-        "timestamp": datetime.now().isoformat()
-    }
-    save_json(COOKIE_FILE, cookie_data)
+def load_csv(path,cols):
+    if os.path.exists(path):
+        try: return pd.read_csv(path)
+        except: return pd.DataFrame(columns=cols)
+    return pd.DataFrame(columns=cols)
+def save_csv(path,df): df.to_csv(path,index=False)
+def local_today(): return datetime.now(tz.gettz("Asia/Seoul")).date()
 
-def load_login_cookie():
-    cookie = load_json(COOKIE_FILE, None)
-    if cookie and "username" in cookie:
-        try:
-            saved_time = datetime.fromisoformat(cookie["timestamp"])
-            if datetime.now() - saved_time < timedelta(days=7):
-                return cookie["username"]
-        except:
-            pass
-    return None
+def hash_password(password: str) -> str:
+    """SHA-256으로 비밀번호를 해시"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def clear_login_cookie():
-    if os.path.exists(COOKIE_FILE):
-        os.remove(COOKIE_FILE)
 
-# ===== 로그인 상태 초기화 =====
-if "user" not in st.session_state:
-    saved_user = load_login_cookie()
-    if saved_user:
-        users = load_users()
-        if any(u["username"] == saved_user for u in users):
-            st.session_state.user = saved_user
-        else:
-            clear_login_cookie()
-            st.session_state.user = None
-    else:
-        st.session_state.user = None
-
-# ===== 데이터 로드 =====
-if "pets" not in st.session_state: 
-    st.session_state.pets = load_json(PET_FILE, [])
-if "med_schedule" not in st.session_state: 
-    st.session_state.med_schedule = load_json(MED_FILE, [])
-if "hospital_events" not in st.session_state: 
-    st.session_state.hospital_events = load_json(HOSP_FILE, [])
+# ===== 초기 세션 =====
+if "pets" not in st.session_state: st.session_state.pets = load_json(PET_FILE,[])
+if "med_schedule" not in st.session_state: st.session_state.med_schedule = load_json(MED_FILE,[])
+if "hospital_events" not in st.session_state: st.session_state.hospital_events = load_json(HOSP_FILE,[])
 if "unsafe_db" not in st.session_state:
-    default_unsafe = [
-        {"category":"음식","name":"초콜릿","risk":"고위험","why":"카카오의 메틸잔틴(테오브로민) 독성"},
-        {"category":"음식","name":"포도/건포도","risk":"고위험","why":"급성 신장손상 보고"}
-    ]
-    st.session_state.unsafe_db = load_json(UNSAFE_FILE, default_unsafe)
+    default_unsafe=[{"category":"음식","name":"초콜릿","risk":"고위험","why":"카카오의 메틸잔틴(테오브로민) 독성"},
+                    {"category":"음식","name":"포도/건포도","risk":"고위험","why":"급성 신장손상 보고"}]
+    st.session_state.unsafe_db = load_json(UNSAFE_FILE,default_unsafe)
 
-# CSV 컬럼 정의
-feed_cols = ["log_id", "pet_id", "date", "amount_g", "memo"]
-water_cols = ["log_id", "pet_id", "date", "amount_ml", "memo"]
-weight_cols = ["log_id", "pet_id", "date", "weight_kg", "memo"]
+feed_cols=["log_id","pet_id","date","amount_g","memo"]
+water_cols=["log_id","pet_id","date","amount_ml","memo"]
+feed_df = load_csv(FEED_FILE,feed_cols)
+water_df = load_csv(WATER_FILE,water_cols)
 
-# ===== 권장량 계산 함수 =====
-def recommended_food_grams(species: str, weight_kg: float) -> tuple:
-    if weight_kg <= 0: 
-        return (0, 0)
-    if species.lower() in ["개", "강아지", "dog"]:
-        kcal = weight_kg * 30 + 70
-        grams = round(kcal / 3.5)
+def recommended_food_grams(species:str,weight_kg:float)->tuple:
+    if weight_kg<=0: return (0,0)
+    if species.lower() in ["개","강아지","dog"]:
+        kcal=weight_kg*30+70; grams=round(kcal/3.5)
     else:
-        kcal = 60 * weight_kg
-        grams = round(kcal / 3.5)
-    return grams, max(0, round(grams * 0.1))
-
-def recommended_water_ml(weight_kg: float) -> int:
-    return int(round(weight_kg * 60)) if weight_kg > 0 else 0
-
-def pet_selector(label="반려동물 선택", key=None):
+        kcal=60*weight_kg; grams=round(kcal/3.5)
+    return grams,max(0,round(grams*0.1))
+def recommended_water_ml(weight_kg:float)->int:
+    return int(round(weight_kg*60)) if weight_kg>0 else 0
+def pet_selector(label="반려동물 선택", key_suffix=""):
+    """
+    반려동물 선택 Selectbox
+    key_suffix : 탭별로 고유 key 부여 (중복 방지)
+    """
     pets = st.session_state.pets
     if not pets:
-        st.info("먼저 반려동물을 등록해 주세요.")
+        st.info("먼저 반려동물을 등록해 주세요 (왼쪽 '반려동물 프로필').")
         return None
     opts = {f"{p['name']} ({p['species']})": p for p in pets}
-    return opts[st.selectbox(label, list(opts.keys()), key=key)]
+    return opts[st.selectbox(label, list(opts.keys()), key=f"pet_selector_{key_suffix}")]
 
 # ===== 페이지 설정 =====
-st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
+st.set_page_config(page_title="PetMate",page_icon="🐾",layout="wide")
 st.title("🐾 PetMate")
 
-# ===== 로그인/회원가입 =====
-if not st.session_state.user:
-    st.info("🔐 PetMate에 오신 것을 환영합니다!")
+# ===== 로그인 상태 확인 =====
+if st.session_state.user is None:
+    # 로그인하지 않은 경우 - 로그인/회원가입 탭만 표시
+    st.info("PetMate에 오신 것을 환영합니다! 로그인하거나 새 계정을 만들어 시작하세요.")
     
-    users = load_users()
-    tab1, tab2 = st.tabs(["로그인", "회원가입"])
+    tab_login = st.tabs(["로그인/회원가입"])[0]
+    
+    with tab_login:
+        st.header("🔐 로그인 & 회원가입")
+        users = load_users()
 
-    with tab1:
-        st.subheader("로그인")
-        username = st.text_input("아이디", key="login_user")
-        password = st.text_input("비밀번호", type="password", key="login_pass")
-        remember = st.checkbox("로그인 상태 유지 (7일)", value=True)
-        
-        if st.button("로그인", type="primary"):
-            hashed = hash_password(password)
-            if any(u["username"] == username and u["password"] == hashed for u in users):
-                st.session_state.user = username
-                if remember:
-                    save_login_cookie(username)
-                st.success(f"✅ {username}님 로그인 성공!")
-                st.rerun()
-            else:
-                st.error("❌ 아이디 또는 비밀번호가 올바르지 않습니다.")
+        tab1, tab2 = st.tabs(["로그인", "회원가입"])
 
-    with tab2:
-        st.subheader("회원가입")
-        new_user = st.text_input("새 아이디", key="signup_user")
-        new_pass = st.text_input("새 비밀번호", type="password", key="signup_pass")
-        new_pass_confirm = st.text_input("비밀번호 확인", type="password", key="signup_pass_confirm")
-        
-        if st.button("회원가입", type="primary"):
-            if not new_user or not new_pass:
-                st.error("❌ 아이디와 비밀번호를 모두 입력해주세요.")
-            elif new_pass != new_pass_confirm:
-                st.error("❌ 비밀번호가 일치하지 않습니다.")
-            elif any(u["username"] == new_user for u in users):
-                st.error("❌ 이미 존재하는 아이디입니다.")
-            else:
-                users.append({"username": new_user, "password": hash_password(new_pass)})
-                save_users(users)
-                st.success("✅ 회원가입 완료! 로그인하세요.")
+       # ---------------- 로그인 ----------------
+with tab1:
+    username = st.text_input("아이디")
+    password = st.text_input("비밀번호", type="password")
+
+    if st.button("로그인"):
+        hashed = hash_password(password)
+        if any(u["username"] == username and u["password"] == hashed for u in users):
+            st.session_state.user = username
+            
+            # 🔥 로그인 유지 쿠키 설정 (30일 유지)
+            st.experimental_set_cookie(
+                "petmate_user",
+                username,
+                expires=datetime.now() + timedelta(days=30)
+            )
+
+            st.success(f"{username}님 로그인 성공!")
+            st.rerun()
+        else:
+            st.error("아이디 또는 비밀번호가 올바르지 않습니다.") 
+
+        # ---------------- 회원가입 ----------------
+        with tab2:
+            new_user = st.text_input("새 아이디")
+            new_pass = st.text_input("새 비밀번호", type="password")
+            if st.button("회원가입"):
+                if not new_user.strip() or not new_pass.strip():
+                    st.error("아이디와 비밀번호를 모두 입력해주세요.")
+                elif any(u["username"] == new_user for u in users):
+                    st.error("이미 존재하는 아이디입니다.")
+                else:
+                    users.append({
+                        "username": new_user,
+                        "password": hash_password(new_pass)
+                    })
+                    save_users(users)
+                    st.success("회원가입 완료! 로그인 탭에서 로그인하세요.")
 
 else:
-    # ===== 로그인 상태 - 헤더 =====
-    col1, col2 = st.columns([6, 1])
+    # 로그인한 경우 - 모든 탭 표시
+    # 상단에 사용자 정보와 로그아웃 버튼 표시
+    col1, col2 = st.columns([3, 1])
     with col1:
-        st.write(f"안녕하세요, **{st.session_state.user}**님! 👋")
+        st.write(f"👋 안녕하세요, **{st.session_state.user}**님!")
     with col2:
-        if st.button("로그아웃"):
-            st.session_state.user = None
-            clear_login_cookie()
-            st.rerun()
-
-    # ===== 메인 탭 =====
-    tabs = st.tabs(["📊 대시보드", "🐶 프로필", "🍽️ 사료/급수", "📈 건강", "💊 복약", "🏥 병원", "⚠️ 위험정보", "🗂️ 데이터"])
+       if st.button("로그아웃"):
+    # 세션 초기화
+    st.session_state.user = None
     
+    # 🔥 쿠키 삭제
+    st.experimental_delete_cookie("petmate_user")
+
+    st.rerun()
+    
+    st.divider()
+    if st.button("👥 계정 삭제"):
+    save_json(USER_FILE, [])
+    st.session_state.user = None
+
+    # 🔥 쿠키 삭제
+    st.experimental_delete_cookie("petmate_user")
+
+    st.success("✅ 모든 회원 계정이 삭제되었습니다.")
+    
+    # 메인 탭들
+    tab_dash, tab_profile, tab_feed, tab_med, tab_hosp, tab_risk, tab_data = st.tabs([
+        "대시보드","반려동물 프로필","사료/급수 기록","복약 알림","병원 일정","위험 정보 검색","데이터 관리"
+    ])
+
+    # ============================
+# 📊 대시보드 — 그래프 시각화 추가
+# ============================
+
+if pet:
+    st.markdown("## 📈 상태 변화 차트")
+
+    # ---------------------------
+    # 최근 7일 날짜 생성
+    # ---------------------------
+    today = local_today()
+    last7 = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+
+    # ---------------------------
+    # ① 사료 섭취량 (최근 7일)
+    # ---------------------------
+    feed_chart = (
+        feed_df[(feed_df["pet_id"] == pet["id"]) & (feed_df["date"].isin(last7))]
+        .groupby("date")["amount_g"]
+        .sum()
+        .reindex(last7, fill_value=0)
+    )
+
+    st.subheader("🍽️ 최근 7일 사료 섭취량")
+    st.line_chart(feed_chart)
+
+    # ---------------------------
+    # ② 물 섭취량 (최근 7일)
+    # ---------------------------
+    water_chart = (
+        water_df[(water_df["pet_id"] == pet["id"]) & (water_df["date"].isin(last7))]
+        .groupby("date")["amount_ml"]
+        .sum()
+        .reindex(last7, fill_value=0)
+    )
+
+    st.subheader("💧 최근 7일 물 섭취량")
+    st.bar_chart(water_chart)
+
+    # ---------------------------
+    # ③ 병원 일정 — 월별 방문수
+    # ---------------------------
+    hosp = pd.DataFrame(st.session_state.hospital_events)
+    hosp_pet = hosp[hosp["pet_id"] == pet["id"]]
+
+    if not hosp_pet.empty:
+        hosp_pet["date"] = pd.to_datetime(hosp_pet["dt"]).dt.to_period("M")
+        hosp_month = hosp_pet.groupby("date").size()
+
+        st.subheader("🏥 월별 병원 방문 횟수")
+        st.line_chart(hosp_month)
+    else:
+        st.info("병원 방문 기록이 아직 없습니다.")
+
+    # ---------------------------
+    # ④ 복약 스케줄 타임라인
+    # ---------------------------
+    meds_pet = [m for m in st.session_state.med_schedule if m["pet_id"] == pet["id"]]
+
+    st.subheader("💊 복약 타임라인 (오늘 기준)")
+    if meds_pet:
+        med_today = []
+        for m in meds_pet:
+            for t in m.get("times", []):
+                med_today.append({"drug": m["drug"], "time": t})
+        med_today_df = pd.DataFrame(med_today).sort_values("time")
+        st.table(med_today_df)
+    else:
+        st.info("오늘 복약 스케줄이 없습니다.")
+
+    # ============================
+# 📊 대시보드 — 선택형 차트 기능 추가
+# ============================
+
+if pet:
+    st.markdown("## 🎛️ 보고 싶은 데이터 선택")
+
+    # 선택 옵션들
+    show_food = st.checkbox("🍽️ 최근 7일 사료 섭취량", value=True)
+    show_water = st.checkbox("💧 최근 7일 물 섭취량", value=True)
+    show_hosp = st.checkbox("🏥 월별 병원 방문 수", value=False)
+    show_meds = st.checkbox("💊 오늘 복약 타임라인", value=False)
+
+    # 날짜 기준
+    today = local_today()
+    last7 = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+
+    # ---------------------------
+    # ① 사료 섭취량
+    # ---------------------------
+    if show_food:
+        st.subheader("🍽️ 최근 7일 사료 섭취량")
+        feed_chart = (
+            feed_df[(feed_df["pet_id"] == pet["id"]) & (feed_df["date"].isin(last7))]
+            .groupby("date")["amount_g"]
+            .sum()
+            .reindex(last7, fill_value=0)
+        )
+        st.line_chart(feed_chart)
+
+    # ---------------------------
+    # ② 물 섭취량
+    # ---------------------------
+    if show_water:
+        st.subheader("💧 최근 7일 물 섭취량")
+        water_chart = (
+            water_df[(water_df["pet_id"] == pet["id"]) & (water_df["date"].isin(last7))]
+            .groupby("date")["amount_ml"]
+            .sum()
+            .reindex(last7, fill_value=0)
+        )
+        st.bar_chart(water_chart)
+
+    # ---------------------------
+    # ③ 병원 방문 (월별)
+    # ---------------------------
+    if show_hosp:
+        st.subheader("🏥 월별 병원 방문 횟수")
+        hosp = pd.DataFrame(st.session_state.hospital_events)
+        hosp_pet = hosp[hosp["pet_id"] == pet["id"]]
+
+        if not hosp_pet.empty:
+            hosp_pet["month"] = pd.to_datetime(hosp_pet["dt"]).dt.to_period("M")
+            hosp_month = hosp_pet.groupby("month").size()
+            st.line_chart(hosp_month)
+        else:
+            st.info("병원 방문 기록이 없습니다.")
+
+    # ---------------------------
+    # ④ 복약 타임라인
+    # ---------------------------
+    if show_meds:
+        st.subheader("💊 오늘 복약 타임라인")
+        meds_pet = [m for m in st.session_state.med_schedule if m["pet_id"] == pet["id"]]
+
+        if meds_pet:
+            med_today = []
+            for m in meds_pet:
+                for t in m.get("times", []):
+                    med_today.append({"약": m["drug"], "시간": t})
+            med_today_df = pd.DataFrame(med_today).sort_values("시간")
+            st.table(med_today_df)
+        else:
+            st.info("오늘 복약 스케줄이 없습니다.")
+
+    # ============================
+# 📊 (확장 기능) 고급 대시보드 기능 추가
+# ============================
+
+st.markdown("## 🧩 고급 데이터 분석 기능")
+
+# ---------------------------
+# 0) 기간 선택
+# ---------------------------
+period = st.selectbox(
+    "📅 조회 기간 선택",
+    ("7일", "14일", "30일"),
+    index=0
+)
+
+days = int(period.replace("일", ""))
+date_range = [(today - timedelta(days=i)).isoformat() for i in range(days-1, -1, -1)]
+
+
+# ========================================================
+# 1) 오늘 섭취량 도넛 차트
+# ========================================================
+st.subheader("🥣 오늘 섭취량 도넛 차트")
+
+eaten = feed_df[(feed_df["pet_id"]==pet["id"]) & (feed_df["date"]==today.isoformat())]["amount_g"].sum()
+grams, snack_limit = recommended_food_grams(pet["species"], float(pet.get("weight_kg", 0)))
+
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots()
+
+remaining = max(grams - eaten, 0)
+
+ax.pie(
+    [eaten, remaining],
+    labels=[f"먹은양 {eaten}g", f"남은양 {remaining}g"],
+    autopct="%1.1f%%",
+    startangle=90,
+    wedgeprops={'width': 0.35}
+)
+
+st.pyplot(fig)
+
+
+# ========================================================
+# 2) 병원 일정 — 캘린더 UI
+# ========================================================
+st.subheader("🗓️ 병원 일정 캘린더")
+
+hosp_pet = [e for e in st.session_state.hospital_events if e["pet_id"] == pet["id"]]
+
+if hosp_pet:
+    cal_data = []
+    for ev in hosp_pet:
+        d = datetime.fromisoformat(ev["dt"]).date()
+        cal_data.append({"날짜": d, "제목": ev["title"], "장소": ev.get("place", "")})
+
+    cal_df = pd.DataFrame(cal_data).sort_values("날짜")
+    st.dataframe(cal_df)
+else:
+    st.info("등록된 병원 일정이 없습니다.")
+
+
+# ========================================================
+# 3) 체중 기록 + 체중 변화 그래프
+# ========================================================
+st.subheader("⚖️ 체중 변화 기록")
+
+# 데이터 파일 준비
+WEIGHT_FILE = os.path.join(DATA_DIR, "weight_log.csv")
+weight_cols = ["log_id", "pet_id", "date", "weight"]
+if os.path.exists(WEIGHT_FILE):
+    weight_df = pd.read_csv(WEIGHT_FILE)
+else:
+    weight_df = pd.DataFrame(columns=weight_cols)
+
+# 체중 입력
+with st.form("weight_form"):
+    new_weight = st.number_input("오늘 체중 (kg):", min_value=0.0, step=0.1)
+    ok_w = st.form_submit_button("저장")
+    if ok_w:
+        rec = pd.DataFrame({
+            "log_id": [str(uuid.uuid4())],
+            "pet_id": [pet["id"]],
+            "date": [today.isoformat()],
+            "weight": [new_weight]
+        })
+        weight_df = pd.concat([weight_df, rec], ignore_index=True)
+        weight_df.to_csv(WEIGHT_FILE, index=False)
+        st.success("체중이 기록되었습니다!")
+
+# 체중 그래프
+w_pet = weight_df[weight_df["pet_id"] == pet["id"]]
+if not w_pet.empty:
+    w_chart = w_pet.set_index("date")["weight"]
+    st.line_chart(w_chart)
+else:
+    st.info("아직 체중 기록이 없습니다.")
+
+
+# ========================================================
+# 4) 여러 마리 비교 (사료 섭취량)
+# ========================================================
+st.subheader("🐾 여러 반려동물 비교")
+
+if len(st.session_state.pets) >= 2:
+    all_pets = st.multiselect(
+        "비교할 반려동물 선택",
+        [f"{p['name']} ({p['id']})" for p in st.session_state.pets]
+    )
+
+    if all_pets:
+        compare_data = {}
+        for opt in all_pets:
+            pid = opt.split("(")[-1].replace(")", "")
+            name = opt.split("(")[0].strip()
+
+            f = feed_df[(feed_df["pet_id"] == pid) & (feed_df["date"].isin(date_range))] \
+                .groupby("date")["amount_g"].sum().reindex(date_range, fill_value=0)
+
+            compare_data[name] = f.values
+
+        chart_df = pd.DataFrame(compare_data, index=date_range)
+        st.line_chart(chart_df)
+    else:
+        st.info("비교할 동물을 선택하세요.")
+else:
+    st.info("2마리 이상 등록해야 비교가 가능합니다.")
     # ===== 대시보드 =====
-    with tabs[0]:
+    
+    with tab_dash:
         st.header("📊 오늘 한눈에 보기")
-        pet = pet_selector(key="dash_pet")
-        
+        pet = pet_selector(key_suffix="dash")
         if pet:
-            feed_df = load_csv(FEED_FILE, feed_cols)
-            water_df = load_csv(WATER_FILE, water_cols)
-            weight_df = load_csv(WEIGHT_FILE, weight_cols)
-            
-            col1, col2, col3 = st.columns(3)
-            
-            # 기본 정보
+            col1,col2,col3 = st.columns(3)
             with col1:
                 st.subheader("기본 정보")
                 st.write(f"**이름**: {pet['name']}")
                 st.write(f"**종**: {pet['species']}")
-                st.write(f"**체중**: {pet.get('weight_kg', '-')} kg")
-                if pet.get("birth"): 
-                    st.write(f"**생일**: {pet['birth']}")
+                st.write(f"**체중**: {pet.get('weight_kg','-')} kg")
+                if pet.get("birth"): st.write(f"**생일**: {pet['birth']}")
+                if pet.get("notes"): st.caption(pet["notes"])
                 if pet.get("photo_path") and os.path.exists(pet["photo_path"]):
-                    st.image(pet["photo_path"], width=150)
-            
-            # 사료 섭취량
+                    st.image(pet["photo_path"],width=150)
             with col2:
-                grams, snack = recommended_food_grams(pet["species"], float(pet.get("weight_kg", 0) or 0))
+                grams,snack_limit = recommended_food_grams(pet["species"],float(pet.get("weight_kg",0) or 0))
                 today = local_today().isoformat()
                 eaten = feed_df[(feed_df["pet_id"]==pet["id"]) & (feed_df["date"]==today)]["amount_g"].sum()
-                st.subheader("사료/간식")
-                st.write(f"권장: {grams} g/일")
-                st.write(f"간식 상한: {snack} g")
-                st.progress(min(1.0, eaten/grams if grams else 0), text=f"오늘: {int(eaten)} g")
-            
-            # 급수량
+                st.subheader("사료/간식 권장량")
+                st.write(f"권장: {grams} g/일 / 간식 상한: {snack_limit} g")
+                st.progress(min(1.0,eaten/grams if grams else 0),text=f"오늘 섭취: {int(eaten)} g")
             with col3:
-                water_ml = recommended_water_ml(float(pet.get("weight_kg", 0) or 0))
+                wml = recommended_water_ml(float(pet.get("weight_kg",0) or 0))
                 drank = water_df[(water_df["pet_id"]==pet["id"]) & (water_df["date"]==today)]["amount_ml"].sum()
-                st.subheader("물")
-                st.write(f"권장: {water_ml} ml/일")
-                st.progress(min(1.0, drank/water_ml if water_ml else 0), text=f"오늘: {int(drank)} ml")
-            
-            # 최근 7일 차트
-            st.divider()
-            st.subheader("📊 최근 7일")
-            
-            end_date = local_today()
-            last7 = [(end_date - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
-            
-            col_a, col_b = st.columns(2)
-            
-            with col_a:
-                st.write("**🍽️ 사료 섭취량**")
-                feed_chart = feed_df[(feed_df["pet_id"]==pet["id"]) & (feed_df["date"].isin(last7))]\
-                    .groupby("date")["amount_g"].sum().reindex(last7, fill_value=0)
-                st.line_chart(feed_chart)
-            
-            with col_b:
-                st.write("**💧 급수량**")
-                water_chart = water_df[(water_df["pet_id"]==pet["id"]) & (water_df["date"].isin(last7))]\
-                    .groupby("date")["amount_ml"].sum().reindex(last7, fill_value=0)
-                st.bar_chart(water_chart)
+                st.subheader("물 권장량")
+                st.write(f"권장: {wml} ml/일")
+                st.progress(min(1.0,drank/wml if wml else 0),text=f"오늘 급수: {int(drank)} ml")
 
-    # ===== 프로필 =====
-    with tabs[1]:
+    # ===== 반려동물 프로필 =====
+    with tab_profile:
         st.header("🐶 반려동물 프로필")
-        
-        with st.form("pet_form", clear_on_submit=True):
-            st.subheader("새 반려동물 등록")
+        st.subheader("등록하기")
+        with st.form("pet_form",clear_on_submit=True):
             name = st.text_input("이름*")
-            species = st.selectbox("종*", ["개", "고양이", "기타"])
-            breed = st.text_input("품종")
-            birth = st.date_input("생일", value=None)
-            weight = st.number_input("체중(kg)", min_value=0.0, step=0.1)
-            notes = st.text_area("메모")
-            photo = st.file_uploader("프로필 사진", type=["jpg", "png", "jpeg"])
-            
-            if st.form_submit_button("추가"):
-                if not name.strip():
-                    st.error("❌ 이름은 필수입니다.")
+            species = st.selectbox("종*",["개","고양이","기타"],index=0)
+            breed = st.text_input("품종 (선택)")
+            birth = st.date_input("생일 (선택)",value=None)
+            weight = st.number_input("체중(kg)",min_value=0.0,step=0.1,value=0.0)
+            notes = st.text_area("메모",placeholder="특이사항, 알레르기 등")
+            photo_upload = st.file_uploader("프로필 사진 (선택)",type=["jpg","png","jpeg"])
+            submitted = st.form_submit_button("추가")
+            if submitted:
+                photo_path = ""
+                if photo_upload:
+                    photo_filename = f"{uuid.uuid4()}_{photo_upload.name}"
+                    photo_path = os.path.join(PHOTO_DIR,photo_filename)
+                    with open(photo_path,"wb") as f: f.write(photo_upload.read())
+                new_pet = {"id":str(uuid.uuid4()),"name":name.strip(),"species":species,
+                           "breed":breed.strip(),"birth":birth.isoformat() if birth else "",
+                           "weight_kg":float(weight),"notes":notes.strip(),"photo_path":photo_path}
+                if not new_pet["name"]:
+                    st.error("이름은 필수입니다.")
                 else:
-                    photo_path = ""
-                    if photo:
-                        photo_path = os.path.join(PHOTO_DIR, f"{uuid.uuid4()}_{photo.name}")
-                        with open(photo_path, "wb") as f: 
-                            f.write(photo.read())
-                    
-                    new_pet = {
-                        "id": str(uuid.uuid4()),
-                        "name": name.strip(),
-                        "species": species,
-                        "breed": breed.strip(),
-                        "birth": birth.isoformat() if birth else "",
-                        "weight_kg": float(weight),
-                        "notes": notes.strip(),
-                        "photo_path": photo_path
-                    }
-                    
                     st.session_state.pets.append(new_pet)
-                    save_json(PET_FILE, st.session_state.pets)
-                    
-                    # 초기 체중 기록
-                    if weight > 0:
-                        weight_df = load_csv(WEIGHT_FILE, weight_cols)
-                        new_w = pd.DataFrame({
-                            "log_id": [str(uuid.uuid4())],
-                            "pet_id": [new_pet["id"]],
-                            "date": [local_today().isoformat()],
-                            "weight_kg": [float(weight)],
-                            "memo": ["초기 등록"]
-                        })
-                        weight_df = pd.concat([weight_df, new_w], ignore_index=True)
-                        save_csv(WEIGHT_FILE, weight_df)
-                    
-                    st.success(f"✅ {name} 등록 완료!")
-                    st.rerun()
-        
-        st.divider()
-        st.subheader("등록된 반려동물")
-        
-        if not st.session_state.pets:
-            st.info("등록된 반려동물이 없습니다.")
+                    save_json(PET_FILE,st.session_state.pets)
+                    st.success(f"{new_pet['name']} 등록 완료")
+
+        st.subheader("목록/편집")
+        if not st.session_state.pets: st.info("등록된 반려동물이 없습니다.")
         else:
             for p in st.session_state.pets:
                 with st.expander(f"{p['name']} ({p['species']})"):
-                    col_a, col_b = st.columns([2, 1])
-                    with col_a:
-                        p["name"] = st.text_input("이름", value=p["name"], key=f"n_{p['id']}")
-                        p["species"] = st.selectbox("종", ["개", "고양이", "기타"],
-                            index=["개", "고양이", "기타"].index(p["species"]) if p["species"] in ["개", "고양이", "기타"] else 2,
-                            key=f"s_{p['id']}")
-                        p["weight_kg"] = st.number_input("체중(kg)", value=float(p.get("weight_kg", 0)), 
-                            step=0.1, key=f"w_{p['id']}")
-                    with col_b:
-                        if st.button("💾 저장", key=f"save_{p['id']}"):
-                            save_json(PET_FILE, st.session_state.pets)
-                            st.success("✅ 저장")
-                            st.rerun()
-                        if st.button("🗑️ 삭제", key=f"del_{p['id']}"):
+                    colA,colB = st.columns([2,1])
+                    with colA:
+                        p["name"] = st.text_input("이름",value=p["name"],key=f"name_{p['id']}")
+                        p["species"] = st.selectbox("종",["개","고양이","기타"],
+                            index=["개","고양이","기타"].index(p["species"]) if p["species"] in ["개","고양이","기타"] else 2,
+                            key=f"species_{p['id']}")
+                        p["breed"] = st.text_input("품종",value=p.get("breed",""),key=f"breed_{p['id']}")
+                        p["birth"] = st.text_input("생일(YYYY-MM-DD)",value=p.get("birth",""),key=f"birth_{p['id']}")
+                        p["weight_kg"] = st.number_input("체중(kg)",value=float(p.get("weight_kg",0.0)),
+                            step=0.1,key=f"weight_{p['id']}")
+                        p["notes"] = st.text_area("메모",value=p.get("notes",""),key=f"notes_{p['id']}")
+                        new_photo = st.file_uploader("프로필 사진 변경",type=["jpg","png","jpeg"],key=f"photo_{p['id']}")
+                        if new_photo:
+                            photo_filename = f"{uuid.uuid4()}_{new_photo.name}"
+                            photo_path = os.path.join(PHOTO_DIR,photo_filename)
+                            with open(photo_path,"wb") as f: f.write(new_photo.read())
+                            p["photo_path"] = photo_path
+                    with colB:
+                        if st.button("저장",key=f"save_{p['id']}"):
+                            save_json(PET_FILE,st.session_state.pets); st.success("저장 완료")
+                        if st.button("삭제",key=f"del_{p['id']}"):
                             st.session_state.pets = [x for x in st.session_state.pets if x["id"]!=p["id"]]
-                            save_json(PET_FILE, st.session_state.pets)
-                            st.warning("⚠️ 삭제")
-                            st.rerun()
+                            save_json(PET_FILE,st.session_state.pets); st.warning("삭제했습니다.")
 
-    # ===== 사료/급수 =====
-    with tabs[2]:
+    # ===== 사료/급수 기록 =====
+    with tab_feed:
         st.header("🍽️ 사료/급수 기록")
-        pet = pet_selector(key="feed_pet")
-        
+        pet = pet_selector(key_suffix="feed")
         if pet:
-            with st.form("feed_form", clear_on_submit=True):
-                c1, c2 = st.columns(2)
+            with st.form("feed_water_form",clear_on_submit=True):
+                c1,c2 = st.columns(2)
                 with c1:
-                    food = st.number_input("사료/간식 (g)", min_value=0, step=5)
-                    food_memo = st.text_input("메모")
+                    food_g = st.number_input("사료/간식 섭취량 (g)",min_value=0,step=5)
+                    food_memo = st.text_input("사료 메모(선택)")
                 with c2:
-                    water = st.number_input("물 (ml)", min_value=0, step=10)
-                    water_memo = st.text_input("메모", key="water_memo")
-                
-                if st.form_submit_button("💾 저장"):
-                    feed_df = load_csv(FEED_FILE, feed_cols)
-                    water_df = load_csv(WATER_FILE, water_cols)
+                    water_ml = st.number_input("급수량 (ml)",min_value=0,step=10)
+                    water_memo = st.text_input("물 메모(선택)")
+                submitted = st.form_submit_button("💾 오늘 기록 저장")
+                if submitted:
                     today = local_today().isoformat()
-                    
-                    if food > 0:
-                        new_f = pd.DataFrame({
-                            "log_id": [str(uuid.uuid4())],
-                            "pet_id": [pet["id"]],
-                            "date": [today],
-                            "amount_g": [int(food)],
-                            "memo": [food_memo.strip()]
-                        })
-                        feed_df = pd.concat([feed_df, new_f], ignore_index=True)
-                        save_csv(FEED_FILE, feed_df)
-                    
-                    if water > 0:
-                        new_w = pd.DataFrame({
-                            "log_id": [str(uuid.uuid4())],
-                            "pet_id": [pet["id"]],
-                            "date": [today],
-                            "amount_ml": [int(water)],
-                            "memo": [water_memo.strip()]
-                        })
-                        water_df = pd.concat([water_df, new_w], ignore_index=True)
-                        save_csv(WATER_FILE, water_df)
-                    
-                    st.success("✅ 저장 완료!")
-                    st.rerun()
+                    if food_g>0:
+                        new_food = pd.DataFrame({"log_id":[str(uuid.uuid4())],"pet_id":[pet["id"]],
+                                                 "date":[today],"amount_g":[int(food_g)],"memo":[food_memo.strip()]})
+                        feed_df = pd.concat([feed_df,new_food],ignore_index=True)
+                    if water_ml>0:
+                        new_water = pd.DataFrame({"log_id":[str(uuid.uuid4())],"pet_id":[pet["id"]],
+                                                  "date":[today],"amount_ml":[int(water_ml)],"memo":[water_memo.strip()]})
+                        water_df = pd.concat([water_df,new_water],ignore_index=True)
+                    save_csv(FEED_FILE,feed_df); save_csv(WATER_FILE,water_df)
+                    st.success("✅ 오늘 기록이 저장되었습니다.")
 
-    # ===== 건강 데이터 =====
-    with tabs[3]:
-        st.header("📈 건강 데이터")
-        pet = pet_selector(key="health_pet")
-        
-        if pet:
-            weight_df = load_csv(WEIGHT_FILE, weight_cols)
-            
-            # 체중 기록
-            with st.form("weight_form", clear_on_submit=True):
-                st.subheader("체중 기록")
-                col1, col2 = st.columns(2)
-                with col1:
-                    w_date = st.date_input("날짜", value=local_today())
-                    new_w = st.number_input("체중 (kg)", min_value=0.0, step=0.1, 
-                                           value=float(pet.get("weight_kg", 0)))
-                with col2:
-                    w_memo = st.text_area("메모")
-                
-                if st.form_submit_button("💾 기록"):
-                    if new_w > 0:
-                        rec = pd.DataFrame({
-                            "log_id": [str(uuid.uuid4())],
-                            "pet_id": [pet["id"]],
-                            "date": [w_date.isoformat()],
-                            "weight_kg": [float(new_w)],
-                            "memo": [w_memo.strip()]
-                        })
-                        weight_df = pd.concat([weight_df, rec], ignore_index=True)
-                        save_csv(WEIGHT_FILE, weight_df)
-                        
-                        # 프로필 업데이트
-                        for p in st.session_state.pets:
-                            if p["id"] == pet["id"]:
-                                p["weight_kg"] = float(new_w)
-                        save_json(PET_FILE, st.session_state.pets)
-                        
-                        st.success("✅ 기록 완료!")
-                        st.rerun()
-            
-            st.divider()
-            
-            # 차트
-            period = st.selectbox("기간", ["최근 7일", "최근 30일", "전체"], index=1)
-            
-            end_date = local_today()
-            if period == "최근 7일":
-                start_date = end_date - timedelta(days=6)
-            elif period == "최근 30일":
-                start_date = end_date - timedelta(days=29)
-            else:
-                start_date = None
-            
-            # 체중 차트
-            st.subheader("⚖️ 체중 변화")
-            pet_w = weight_df[weight_df["pet_id"] == pet["id"]].copy()
-            
-            if not pet_w.empty:
-                pet_w["date"] = pd.to_datetime(pet_w["date"])
-                pet_w = pet_w.sort_values("date")
-                if start_date:
-                    pet_w = pet_w[pet_w["date"] >= pd.Timestamp(start_date)]
-                
-                if not pet_w.empty:
-                    w_chart = pet_w.set_index("date")["weight_kg"]
-                    st.line_chart(w_chart)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("현재", f"{pet_w.iloc[-1]['weight_kg']:.1f} kg")
-                    with col2:
-                        if len(pet_w) > 1:
-                            change = pet_w.iloc[-1]['weight_kg'] - pet_w.iloc[0]['weight_kg']
-                            st.metric("변화", f"{change:+.1f} kg")
-                    with col3:
-                        st.metric("평균", f"{pet_w['weight_kg'].mean():.1f} kg")
-                else:
-                    st.info("선택한 기간에 기록이 없습니다.")
-            else:
-                st.info("체중 기록이 없습니다.")
-            
-            st.divider()
-            
-            # 사료 차트
-            st.subheader("🍽️ 사료 섭취량")
-            feed_df = load_csv(FEED_FILE, feed_cols)
-            pet_f = feed_df[feed_df["pet_id"] == pet["id"]].copy()
-            
-            if not pet_f.empty:
-                pet_f["date"] = pd.to_datetime(pet_f["date"])
-                if start_date:
-                    pet_f = pet_f[pet_f["date"] >= pd.Timestamp(start_date)]
-                
-                if not pet_f.empty:
-                    daily_f = pet_f.groupby("date")["amount_g"].sum()
-                    st.line_chart(daily_f)
-                else:
-                    st.info("기간 내 기록 없음")
-            else:
-                st.info("사료 기록 없음")
-            
-            st.divider()
-            
-            # 급수 차트
-            st.subheader("💧 급수량")
-            water_df = load_csv(WATER_FILE, water_cols)
-            pet_wat = water_df[water_df["pet_id"] == pet["id"]].copy()
-            
-            if not pet_wat.empty:
-                pet_wat["date"] = pd.to_datetime(pet_wat["date"])
-                if start_date:
-                    pet_wat = pet_wat[pet_wat["date"] >= pd.Timestamp(start_date)]
-                
-                if not pet_wat.empty:
-                    daily_w = pet_wat.groupby("date")["amount_ml"].sum()
-                    st.bar_chart(daily_w)
-                else:
-                    st.info("기간 내 기록 없음")
-            else:
-                st.info("급수 기록 없음")
-
-    # ===== 복약 =====
-    with tabs[4]:
+    # ===== 복약 알림 =====
+    with tab_med:
         st.header("💊 복약 스케줄")
-        pet = pet_selector(key="med_pet")
-        
+        pet = pet_selector(key_suffix="med")
         if pet:
-            with st.form("med_form", clear_on_submit=True):
-                st.subheader("새 스케줄")
+            st.subheader("새 복약 스케줄 추가")
+            with st.form("med_form",clear_on_submit=True):
                 drug = st.text_input("약 이름*")
-                dose = st.text_input("용량")
-                unit = st.text_input("단위")
-                times = st.text_input("시간 (HH:MM, 콤마 구분)", placeholder="08:00, 20:00")
-                c1, c2 = st.columns(2)
-                with c1: 
-                    start = st.date_input("시작일", value=local_today())
-                with c2: 
-                    end = st.date_input("종료일", value=None)
+                dose = st.text_input("용량(예: 5)")
+                unit = st.text_input("단위(예: mg, 정 등)")
+                times_str = st.text_input("복용 시간들(HH:MM, 콤마로 구분)",placeholder="08:00, 20:00")
+                c1,c2 = st.columns(2)
+                with c1: start = st.date_input("시작일",value=local_today())
+                with c2: end = st.date_input("종료일(선택)",value=None)
                 notes = st.text_area("메모")
-                
-                if st.form_submit_button("추가"):
-                    if drug.strip() and times.strip():
-                        rec = {
-                            "id": str(uuid.uuid4()),
-                            "pet_id": pet["id"],
-                            "drug": drug.strip(),
-                            "dose": dose.strip(),
-                            "unit": unit.strip(),
-                            "times": [t.strip() for t in times.split(",") if t.strip()],
-                            "start": start.isoformat(),
-                            "end": end.isoformat() if end else "",
-                            "notes": notes.strip()
-                        }
-                        st.session_state.med_schedule.append(rec)
-                        save_json(MED_FILE, st.session_state.med_schedule)
-                        st.success("✅ 추가 완료!")
-                        st.rerun()
+                ok = st.form_submit_button("추가")
+                if ok:
+                    rec = {"id":str(uuid.uuid4()),"pet_id":pet["id"],"drug":drug.strip(),
+                           "dose":dose.strip(),"unit":unit.strip(),
+                           "times":[t.strip() for t in times_str.split(",") if t.strip()],
+                           "start":start.isoformat() if start else "",
+                           "end":end.isoformat() if end else "",
+                           "notes":notes.strip()}
+                    if not rec["drug"] or not rec["times"]:
+                        st.error("약 이름과 시간은 필수입니다.")
                     else:
-                        st.error("❌ 약 이름과 시간은 필수입니다.")
-            
-            st.divider()
-            st.subheader("등록된 스케줄")
+                        st.session_state.med_schedule.append(rec)
+                        save_json(MED_FILE,st.session_state.med_schedule)
+                        st.success("추가 완료")
+
+            st.subheader("스케줄 목록/삭제")
             meds = [m for m in st.session_state.med_schedule if m["pet_id"]==pet["id"]]
-            
-            if not meds:
-                st.info("등록된 스케줄이 없습니다.")
+            if not meds: st.info("등록된 스케줄이 없습니다.")
             else:
                 for m in meds:
-                    with st.expander(f"{m['drug']} - {', '.join(m.get('times', []))}"):
-                        st.write(f"**용량**: {m['dose']}{m['unit']}")
-                        st.write(f"**기간**: {m.get('start')} ~ {m.get('end') or '지속'}")
-                        if m.get("notes"):
-                            st.caption(m["notes"])
-                        if st.button("🗑️ 삭제", key=f"med_del_{m['id']}"):
+                    with st.expander(f"{m['drug']} {m['dose']}{m['unit']} | {', '.join(m.get('times', []))}"):
+                        st.write(f"기간: {m.get('start','')} ~ {m.get('end','') or '지속'}")
+                        if m.get("notes"): st.caption(m["notes"])
+                        if st.button("이 스케줄 삭제",key=f"med_del_{m['id']}"):
                             st.session_state.med_schedule = [x for x in st.session_state.med_schedule if x["id"]!=m["id"]]
-                            save_json(MED_FILE, st.session_state.med_schedule)
-                            st.warning("삭제됨")
-                            st.rerun()
+                            save_json(MED_FILE,st.session_state.med_schedule)
+                            st.warning("삭제했습니다.")
+            st.info("알림은 앱 내 표시만 제공됩니다. 시스템 알림이 필요하면 iCal 내보내기/캘린더 연동을 추후 추가하세요.")
 
-    # ===== 병원 =====
-    with tabs[5]:
-        st.header("🏥 병원 일정")
-        pet = pet_selector(key="hosp_pet")
-        
+    # ===== 병원 일정 =====
+    with tab_hosp:
+        st.header("🏥 병원 일정 관리")
+        pet = pet_selector(key_suffix="hosp")
         if pet:
-            with st.form("hosp_form", clear_on_submit=True):
-                st.subheader("일정 추가")
+            st.subheader("일정 추가")
+            with st.form("hosp_form",clear_on_submit=True):
                 title = st.text_input("제목*")
-                c1, c2 = st.columns(2)
-                with c1: 
-                    d = st.date_input("날짜", value=local_today())
-                with c2: 
-                    t = st.time_input("시간", value=time(10, 0))
+                dt_col1,dt_col2 = st.columns(2)
+                with dt_col1: d = st.date_input("날짜",value=local_today())
+                with dt_col2: t = st.time_input("시간",value=time(hour=10,minute=0))
                 place = st.text_input("장소")
                 notes = st.text_area("메모")
-                
-                if st.form_submit_button("추가"):
-                    if title.strip():
-                        rec = {
-                            "id": str(uuid.uuid4()),
-                            "pet_id": pet["id"],
-                            "title": title.strip(),
-                            "dt": datetime.combine(d, t).isoformat(),
-                            "place": place.strip(),
-                            "notes": notes.strip()
-                        }
-                        st.session_state.hospital_events.append(rec)
-                        save_json(HOSP_FILE, st.session_state.hospital_events)
-                        st.success("✅ 추가 완료!")
-                        st.rerun()
+                ok = st.form_submit_button("추가")
+                if ok:
+                    dt_iso = datetime.combine(d,t).isoformat()
+                    rec = {"id":str(uuid.uuid4()),"pet_id":pet["id"],"title":title.strip(),
+                           "dt":dt_iso,"place":place.strip(),"notes":notes.strip()}
+                    if not rec["title"]: st.error("제목은 필수입니다.")
                     else:
-                        st.error("❌ 제목은 필수입니다.")
-            
-            st.divider()
-            st.subheader("다가오는 일정")
-            events = [e for e in st.session_state.hospital_events if e["pet_id"]==pet["id"]]
-            events = sorted(events, key=lambda x: x["dt"])
-            
-            if not events:
-                st.info("등록된 일정이 없습니다.")
-            else:
-                for e in events:
-                    dt_str = datetime.fromisoformat(e["dt"]).strftime("%Y-%m-%d %H:%M")
-                    st.write(f"**{dt_str}** · {e['title']} @ {e.get('place', '')}")
-                    if e.get("notes"):
-                        st.caption(e["notes"])
-                    if st.button("🗑️ 삭제", key=f"hosp_del_{e['id']}"):
-                        st.session_state.hospital_events = [x for x in st.session_state.hospital_events if x["id"]!=e["id"]]
-                        save_json(HOSP_FILE, st.session_state.hospital_events)
-                        st.warning("삭제됨")
-                        st.rerun()
+                        st.session_state.hospital_events.append(rec)
+                        save_json(HOSP_FILE,st.session_state.hospital_events)
+                        st.success("추가 완료")
 
-    # ===== 위험 정보 =====
-    with tabs[6]:
-        st.header("⚠️ 위험 음식/식물/물품")
-        
-        query = st.text_input("검색어", placeholder="예: 초콜릿, 양파")
-        
+            st.subheader("다가오는 일정")
+            upcoming = [e for e in st.session_state.hospital_events if e["pet_id"]==pet["id"]]
+            upcoming = sorted(upcoming,key=lambda x: x["dt"])
+            if not upcoming: st.info("등록된 일정이 없습니다.")
+            else:
+                for e in upcoming:
+                    dt_kst = datetime.fromisoformat(e["dt"]).astimezone(tz.gettz("Asia/Seoul")).strftime("%Y-%m-%d %H:%M")
+                    st.write(f"**{dt_kst}** · {e['title']} @ {e.get('place','')}")
+                    if e.get("notes"): st.caption(e["notes"])
+                    if st.button("삭제",key=f"evt_del_{e['id']}"):
+                        st.session_state.hospital_events = [x for x in st.session_state.hospital_events if x["id"]!=e["id"]]
+                        save_json(HOSP_FILE,st.session_state.hospital_events)
+                        st.warning("삭제했습니다.")
+
+    # ===== 위험 정보 검색 =====
+    with tab_risk:
+        st.header("⚠️ 위험 음식/식물/물품 검색")
+        q = st.text_input("검색어",placeholder="예: 초콜릿, 양파 …")
+
+        # 🔹 안전장치 추가
         db = pd.DataFrame(st.session_state.unsafe_db)
         for col in ["category", "risk"]:
             if col not in db.columns:
-                db[col] = "기타"
-        
-        if query:
-            view = db[db["name"].str.contains(query, case=False, na=False)]
-        else:
-            view = db
-        
-        st.dataframe(view.sort_values(["category", "risk"]), use_container_width=True)
-        
-        with st.expander("➕ 항목 추가"):
-            with st.form("unsafe_form", clear_on_submit=True):
-                cat = st.selectbox("분류", ["음식", "식물", "물품"])
-                name = st.text_input("이름")
-                risk = st.selectbox("위험도", ["주의", "중간-고위험", "고위험"])
+                db[col] = "기타"   # 기본값
+
+        view = db[db["name"].str.contains(q,case=False,na=False)] if q else db
+        st.dataframe(view.sort_values(["category","risk"]))
+
+        with st.expander("항목 추가/수정"):
+            st.caption("간단한 내부 DB입니다. 필요 시 직접 업데이트하세요.")
+            with st.form("unsafe_add",clear_on_submit=True):
+                cat = st.selectbox("분류",["음식","식물","물품"])
+                nm = st.text_input("이름")
+                rk = st.selectbox("위험도",["주의","중간-고위험","고위험"])
                 why = st.text_area("이유/설명")
-                
-                if st.form_submit_button("추가"):
-                    if name.strip():
-                        st.session_state.unsafe_db.append({
-                            "category": cat,
-                            "name": name.strip(),
-                            "risk": risk,
-                            "why": why.strip()
-                        })
-                        save_json(UNSAFE_FILE, st.session_state.unsafe_db)
-                        st.success("✅ 추가됨!")
-                        st.rerun()
-                    else:
-                        st.error("❌ 이름을 입력하세요.")
+                ok = st.form_submit_button("추가")
+                if ok:
+                    st.session_state.unsafe_db.append({
+                        "category":cat,
+                        "name":nm.strip(),
+                        "risk":rk,
+                        "why":why.strip()
+                    })
+                    save_json(UNSAFE_FILE,st.session_state.unsafe_db)
+                    st.success("추가했습니다.")
 
     # ===== 데이터 관리 =====
-    with tabs[7]:
-        st.header("🗂️ 데이터 관리")
-        
-        st.subheader("데이터 초기화")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🍽️ 사료/급수/체중 초기화", use_container_width=True):
-                save_csv(FEED_FILE, pd.DataFrame(columns=feed_cols))
-                save_csv(WATER_FILE, pd.DataFrame(columns=water_cols))
-                save_csv(WEIGHT_FILE, pd.DataFrame(columns=weight_cols))
-                st.success("✅ 초기화 완료")
-                st.rerun()
-        
-        with col2:
-            if st.button("🐾 프로필/일정 초기화", use_container_width=True):
-                save_json(PET_FILE, [])
-                save_json(MED_FILE, [])
-                save_json(HOSP_FILE, [])
-                save_json(UNSAFE_FILE, [])
-                st.session_state.pets = []
-                st.session_state.med_schedule = []
-                st.session_state.hospital_events = []
-                st.session_state.unsafe_db = []
-                st.success("✅ 초기화 완료")
-                st.rerun()
-        
-        st.divider()
-        
-        st.subheader("⚠️ 위험 구역")
-        st.warning("아래 버튼을 누르면 모든 계정이 삭제됩니다.")
-        if st.button("🗑️ 모든 계정 삭제", type="primary"):
-            save_json(USER_FILE, [])
-            st.session_state.user = None
-            clear_login_cookie()
-            st.success("✅ 모든 계정이 삭제되었습니다.")
-            st.rerun()
+    with tab_data:
+        st.header("🗂️ 데이터 관리/백업")
+        c1,c2 = st.columns(2)
+        with c1:
+            if st.button("사료/급수 로그 초기화"):
+                save_csv(FEED_FILE,pd.DataFrame(columns=feed_cols))
+                save_csv(WATER_FILE,pd.DataFrame(columns=water_cols))
+                st.success("초기화 완료")
+        with c2:
+            if st.button("프로필/복약/일정/DB 초기화"):
+                save_json(PET_FILE,[]); save_json(MED_FILE,[])
+                save_json(HOSP_FILE,[]); save_json(UNSAFE_FILE,[])
+                st.success("초기화 완료")
+
+        if st.button("👥 계정 삭제"):
+            save_json(USER_FILE, [])       # users.json 파일 비우기
+            st.session_state.user = None   # 혹시 로그인 중이면 로그아웃 처리
+            st.success("✅ 모든 회원 계정이 삭제되었습니다.")
 
 # ===== 푸터 =====
 st.divider()
