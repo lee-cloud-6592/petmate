@@ -7,18 +7,25 @@ import hashlib
 import matplotlib.pyplot as plt
 
 # =============================================
-# 🔐 Step 0: 쿠키 기반 로그인 유지 (가장 먼저 실행)
+# 🔐 Step 0: 쿠키 기반 자동 로그인 (가장 먼저 실행)
 # =============================================
+st.set_page_config(page_title="PetMate", page_icon="🐾", layout="wide")
 
-cookie_user = st.experimental_get_cookie("petmate_user")
+# 0-1) users.json 불러오기 (필수)
+users = load_json(USER_FILE, [])
 
+# 세션에 user가 없으면 초기화
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# 쿠키로 자동 로그인
+# 0-2) 쿠키 불러오기
+cookie_user = st.experimental_get_cookie("petmate_user")
+
+# 0-3) 쿠키가 있고 아직 로그인 안된 경우 → 자동 로그인
 if cookie_user and st.session_state.user is None:
     st.session_state.user = cookie_user
-    st.rerun()
+    st.rerun()   # 로그인된 상태로 새로고침
+
     # =============================================
 # Step 1 — 데이터 경로 및 유틸 함수
 # =============================================
@@ -99,10 +106,7 @@ if st.session_state.user is None:
 
     st.info("PetMate에 오신 것을 환영합니다! 로그인하거나 새 계정을 만들어 시작하세요.")
 
-    # ---------------- 로그인 ----------------
-    with tab_login:
-        username = st.text_input("아이디")
-        password = st.text_input("비밀번호", type="password")
+    # ---------------- 로그인 ---------------
 
         if st.button("로그인"):
             hashed = hash_pw(password)
